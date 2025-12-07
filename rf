@@ -2,6 +2,49 @@
 error_reporting(0);
 date_default_timezone_set("Asia/Jakarta");
 define('SIGN_KEY', '2018red8688RendfingerSxxd');
+/* ============================================
+   UNIVERSAL INPUT LOADER (CLI / SERVER / WEB)
+=============================================== */
+
+function loadUniversalInput() {
+    $final = [];
+
+    // 1. Ambil dari $INPUT jika ada
+    if (isset($GLOBALS['INPUT']) && is_array($GLOBALS['INPUT'])) {
+        $final = array_merge($final, $GLOBALS['INPUT']);
+    }
+
+    // 2. Ambil dari $input (lowercase) jika ada
+    if (isset($GLOBALS['input']) && is_array($GLOBALS['input'])) {
+        $final = array_merge($final, $GLOBALS['input']);
+    }
+
+    // 3. Ambil dari $_POST (jika server PHP)
+    if (!empty($_POST)) {
+        $final = array_merge($final, $_POST);
+    }
+
+    // 4. Ambil dari $_GET (jika server PHP)
+    if (!empty($_GET)) {
+        $final = array_merge($final, $_GET);
+    }
+
+    // 5. Ambil dari CLI arguments
+    if (PHP_SAPI === 'cli' && isset($GLOBALS['argv'])) {
+        foreach ($GLOBALS['argv'] as $arg) {
+            if (strpos($arg, '--') === 0) {
+                $split = explode('=', substr($arg, 2), 2);
+                if (count($split) == 2) {
+                    $final[strtolower($split[0])] = $split[1];
+                }
+            }
+        }
+    }
+
+    return $final;
+}
+
+$INPUT = loadUniversalInput();
 
 /* ===================
    MULTI RESTOCK WINDOWS
