@@ -1,0 +1,740 @@
+<?php
+
+error_reporting(0);
+date_default_timezone_set("Asia/Jakarta");
+define('SIGN_KEY', '2018red8688RendfingerSxxd');
+/* ===================
+   MULTI RESTOCK WINDOWS
+=================== */
+$restockWindows = [
+    ["08:50", "09:40"],
+    ["10:50", "11:40"],
+    ["12:50", "13:40"],
+    ["14:50", "15:40"],
+    ["16:50", "17:40"],
+    ["00:00", "24:00"]
+];
+$newlinePadding = "\r" . str_repeat(' ', 62 ). "\r";
+clearScreen();
+
+/* ===================
+   DATA USER LINK
+   capture inspeks/developer tool
+   cari link dimulai host "twplay.redfinger.com" -> copy link
+=================== */
+$userLink = loadOrInput("load", "Link");
+
+/* ===================
+   WEBHOOK DISCORD
+   pemberitahuan
+=================== */
+$discordWebhook = loadOrInput("load", "Webhook");
+/* ===================
+   INPUT KODE REDEEM
+=================== */
+$redeemCode = loadOrInput("load", "redeemCode");
+
+if (!$userLink) {
+    clearScreen();
+    die(print("Harap Diisi UserLink"));
+}
+print "=== METHODE ===\n[1] WAR KODE REDEEM\n[2] GANTI SERVER/ANDROID\n\n";
+$selectMethod = loadOrInput(2,"Pilih Nomor: ");
+
+if ($selectMethod == 1) {
+    if (!$redeemCode) {
+        clearScreen();
+        die(print("Harap Diisi Kode Redeem"));
+    }
+    clearScreen();
+    goto war;
+} elseif ($selectMethod == 2) {
+    clearScreen();
+    goto Replace;
+}
+
+
+
+war:
+$requestParams = generateRequestParams();
+$userId = $requestParams["userId"];
+if (in_array(null, [$userId], true)) {
+    exit;
+}
+
+
+
+/* ===================
+   REQUEST GOODS OPTION
+=================== */
+$postData = ["activationCode" => strtoupper(str_replace(["-", " "], "", $redeemCode))];
+$url = "https://twplay.redfinger.com/osfingerauth/order/v2/goodsOption.json";
+$response = sendRequest($url, $postData);
+//die(print_r(json_encode($response)));
+$data = $response;//die(print_r($data));
+
+//$data = json_decode('{"resultCode":0,"resultMsg":null,"resultInfo":[{"optionsType":"idc_code","title":"Silakan pilih server","attributes":[{"name":"Hong Kong 2","attributeValue":"HKXC_IDC_01","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":"https:\/\/hkxcscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":1},{"name":"Hongkong","attributeValue":"HK_IDC_01","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":"https:\/\/hkcfscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":1},{"name":"Thailand","attributeValue":"TH_IDC_01","remark":"","checkFlag":"1","defaultSelectFlag":"1","pingUrl":"https:\/\/tgcfscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":null},{"name":"Singapore","attributeValue":"SG_IDC_03","remark":"","checkFlag":"1","defaultSelectFlag":"1","pingUrl":"https:\/\/sgcfscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":null},{"name":"Taiwan","attributeValue":"TW_IDC_04","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":"https:\/\/zhtwscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":null},{"name":"United States","attributeValue":"US_IDC_01","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":"https:\/\/usscreencap.redfinger.com\/ping\/idc\/control\/node.json","gradeLevel":10}]},{"optionsType":"rom_version","title":"Silakan pilih versi sistem","attributes":[{"name":"Android 10","attributeValue":"10.0","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":null,"gradeLevel":2},{"name":"Android 15.0","attributeValue":"15.0","remark":"Android 15.0","checkFlag":"1","defaultSelectFlag":"1","pingUrl":null,"gradeLevel":5},{"name":"Android 8.1","attributeValue":"8.1","remark":"","checkFlag":"0","defaultSelectFlag":"0","pingUrl":null,"gradeLevel":3},{"name":"Android 12.0","attributeValue":"12.0","remark":"","checkFlag":"1","defaultSelectFlag":"1","pingUrl":null,"gradeLevel":1}]}],"totalCount":1,"errorStackTrace":null,"requestParameter":null,"elapsedTime":12,"logId":"9d86fb49-a64f-460e-8417-3d0cac49d0f5"}');
+if (in_array($data->resultCode, [-9999, 401, 402, 403, 406])) {
+    die(print_r($response));
+}
+////
+$servers  = $data->resultInfo[0]->attributes;
+$androids = $data->resultInfo[1]->attributes;
+clearScreen();
+
+/* ===================
+   PILIH ANDROID
+=================== */
+androidVer:
+$pAndroid = null;
+
+// Hitung jumlah Android
+$androidCount = count($androids);
+
+// Jika hanya 1 Android, otomatis pilih
+if ($androidCount === 1) {
+    $pAndroid = 0;
+} else {
+    // Hitung jumlah default Android
+    $defaultAndroids = array_filter($androids, fn($a) => $a->defaultSelectFlag == 1 && $a->checkFlag == 1);
+    $defaultCount = count($defaultAndroids);
+
+    if ($defaultCount === 1) {
+        // Jika hanya 1 default, otomatis pilih
+        $pAndroid = array_key_first($defaultAndroids);
+    } else {
+        // Jika lebih dari 1 default, beri pilihan
+        print "⚠ Ada $defaultCount versi Android default, pilih salah satu:\n";
+        foreach ($androids as $i => $a) {
+            $mark = ($a->defaultSelectFlag == 1 && $a->checkFlag == 1) ? "(default)" : "";
+            print "[".($i+1)."] {$a->name} $mark\n";
+        }
+        $pAndroid = loadOrInput($androids, "\nPilih Nomor: ");
+    }
+}
+
+$androidn = $androids[$pAndroid]->name;
+$androidVer = $androids[$pAndroid]->attributeValue;
+if (!$androidVer) goto androidVer;
+
+/* ===================
+   PILIH SERVER
+=================== */
+serverId:
+$pServer = null;
+$serverCount = count($servers);
+
+if ($serverCount === 1) {
+    // Jika hanya 1 server, otomatis pilih
+    $pServer = 0;
+} else {
+    // Hitung jumlah default Server
+    $defaultServers = array_filter($servers, fn($s) => $s->defaultSelectFlag == 1 && $s->checkFlag == 1);
+    $defaultCount = count($defaultServers);
+
+    if ($defaultCount === 1) {
+        $pServer = array_key_first($defaultServers);
+    } else {
+        // Jika lebih dari 1 default, beri pilihan
+        print "⚠ Ada $defaultCount server default, pilih salah satu:\n";
+        foreach ($servers as $i => $s) {
+            $mark = ($s->defaultSelectFlag == 1 && $s->checkFlag == 1) ? "(default)" : "";
+            print "[".($i+1)."] {$s->name} $mark\n";
+        }
+        print "[".($i + 2) . "] Random Server Terbaik\n";
+        $array_merge = array_merge($servers, [999 => 999]);
+        $arr_count = count($array_merge);
+        $pServer = loadOrInput($array_merge, "\nPilih Nomor: ");
+    }
+}
+
+$servern = $servers[$pServer]->name;
+$serverId = $servers[$pServer]->attributeValue;
+
+// Jika pilih Random Server terbaik
+if ($pServer + 1 == $arr_count) {
+    $count = $i;
+} elseif (!$serverId) goto serverId;
+
+
+
+clearScreen();
+print "=== PERLENGKAPAN REDFINGER CLOUD ===\nID Account  : $userId\nKode Redeem : $redeemCode\nAndroid     : {$androids[$pAndroid]->name}\nServer      : "
+    . ($pServer == $i + 1 ? $join : ($servers[$pServer]->name ?? "Unknown"))
+    . "\n\n";
+    
+
+//die(print_r($ordered));
+/* ===================
+   GANTI BAGIAN TIMER
+=================== */
+//die(print($androidVer));
+ulang:
+$x = 0;
+while (true) {
+
+    usleep(500000);
+    while (true) {
+        $window = getActiveRestockWindow($restockWindows);
+        if ($window !== null) break;
+        $sisa = timeUntilNextRestock($restockWindows);
+        waitSeconds($sisa);
+    }
+    
+    if (time() > $window[1]) {
+        print "⛔ restock selesai: " . date("H:i") . "\n";
+        print "Tunggu 1 Menit";
+        sleep(60);
+        print $newlinePadding;
+        continue;
+    }
+
+    if ($count) {
+        $servern = $ordered[$x]->name;
+        $serverId = $ordered[$x]->attributeValue;
+        if (!$serverId) {
+            goto ulang;
+        }
+    }
+
+    $x++;
+    if ($x > $i) $x = 0;
+    static $tryCount = 0;
+    $tryCount++;
+
+    $postData = [
+        "orderBizType" => "0",
+        "goodsOptionsTypeValueJson" => json_encode([
+            "rom_version" => $androidVer,
+            "idc_code" => $serverId
+        ], JSON_UNESCAPED_SLASHES),
+        "activationCode" => strtoupper(str_replace(["-", " "], "", $redeemCode))
+    ];
+    
+    $requestParams = generateRequestParams();
+    $url = "https://twplay.redfinger.com/osfingerauth/order/checkGoods.json";
+    $response = sendRequest($url, $postData);
+    $resultCode = $response->resultCode;
+    $resultMsg = $response->resultMsg;
+    $postData = [
+        "goodsOptionsTypeValueJson" => json_encode([
+            "rom_version" => $androidVer,
+            "idc_code" => $serverId
+        ], JSON_UNESCAPED_SLASHES),
+        "bizType" => "0",
+        "code" => strtoupper(str_replace(["-", " "], "", $redeemCode))
+    ];
+    
+    if ($resultCode == 0) {
+        print "activation\n";
+        for ($k = 1; $k <= 5; $k++) {
+            if (preg_match('/^https:\/\/(canary\.|ptb\.)?discord\.com\/api\/webhooks\/\d+\/[\w-]+$/', $discordWebhook)) {
+            
+                $requestParams = generateRequestParams();
+                $url = "https://twplay.redfinger.com/osfingerauth/activation/checkActivationCode.json";
+                $response = sendRequest($url, $postData);print_r($response);
+                if ($response->resultCode == 0) {
+                    print "congratulation!\n";
+                    $msg = "🎉 **Redeem Berhasil!**\n".
+                        "Kode : $redeemCode\n".
+                        "Android : ".$androidn."\n".
+                        "Server : ".$servern."\n".
+                        "Waktu : ".date("H:i"). " WIB";
+                    die(sendToDiscord($discordWebhook, $msg));
+                }/* else {
+                    die(print_r($response));
+                }*/
+            } else {
+                print $resultMsg."\n";
+                die(print(date("H:i") . "\n"));
+            }
+            print "Tunggu";
+            sleep(2);
+        }
+    } elseif ($resultCode == 2108) {
+        print explode("dan", $resultMsg)[0];
+        sleep(1);
+        print $newlinePadding;
+    } elseif (in_array($resultCode, [2130, 2131])) {
+        die(print($resultMsg));
+    } elseif ($resultCode == 2135) {
+        if (preg_match('/(\d+)\s*minutes/i', $resultMsg, $m)) {
+            $seconds = (int)$m[1] * 60;
+        } elseif (preg_match('/(\d+)\s*seconds/i', $resultMsg, $m)) {
+            $seconds = (int)$m[1];
+        } else {
+            $seconds = 60;
+        }
+        waitSeconds($seconds);
+    } else {
+        print_r(removeEmptyProperties($response));
+    }
+    
+
+    if (in_array($resultCode, [-9999, 401, 402, 403, 406])) {
+        die(print_r($response));
+    } elseif ($resultCode == 500) {
+        print "✖ Server error → tunggu 5–10 detik";
+        sleep(5);
+        print $newlinePadding;
+    }/* else {
+        print date("H:i") . "\n";
+        die(print_r($response));
+    }*/
+    
+    if ($tryCount % 3 == 0) {
+        print "Tunggu";
+        sleep(1);
+        print $newlinePadding;
+    }
+}
+
+
+
+
+//Mozilla/5.0 (Linux; Android 12; sdk_gphone64_x86_64 Build/SE1A.211212.001.B1; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.102 Mobile Safari/537.36 RedfingerID/1.9.14.03(googleplay)',//okhttp/3.10.0',//Mozilla/5.0 (Linux; Android 10; K)
+
+clearScreen();
+Replace:
+$requestParams = generateRequestParams();
+$url = "https://twplay.redfinger.com/osfingerlogin/pad/v2/getPadList.html";
+$response = sendRequest($url);
+$padList = $response->resultInfo->padList;
+print "Harap Dibaca!!!!\n1. Data di perangkat akan dihapus setelah penggantian,\nharap operasikan dengan hati-hati\n2. Setelah melebihi batas penggantian harian,\nsilakan coba lagi keesokan harinya\n\n";
+
+
+print "\n=== Nama Cloudphone ===\n";
+foreach ($padList as $b => $c) {
+    print "[".($b+1)."] {$c->padName} - {$c->roomName}\n";
+}
+$padChoice = loadOrInput($padList,"\nPilih Nomor: ");
+
+$padId = $padList[$padChoice]->padId;
+$padCode = $padList[$padChoice]->padCode;
+
+//print_r($padId.$padCode);exit;
+$extra = [
+    'classifyValue' => 16,
+    'pageSource' => 'renewalPad',
+    'padIdList' => $padId
+];
+$requestParams = generateRequestParams($extra);
+$url = "https://twplay.redfinger.com/osfingerauth/order/newVersionPadClassify/goodsOption.json";
+$response = sendRequest($url);// print_r($response);
+$items = $response->resultInfo->attributes;
+
+$rom = [];
+$server = [];
+
+foreach ($items as $row) {
+    $rom[$row->romVersion->attributeValue] = $row->romVersion->name;
+    $server[$row->idcCode->attributeValue] = $row->idcCode->name;
+}
+
+$romIndex = array_keys($rom);
+if (count($romIndex) == 1) {
+    $romChoice = 0;
+} else {
+    print "=== Pilihan Versi Android ===\n";
+    foreach ($romIndex as $i => $a) {
+        print "[".($i+1)."] {$rom[$a]}\n";
+    }
+    $romChoice = loadOrInput($romIndex,"\nPilih Nomor: ");
+}
+
+$selectedRom = $romIndex[$romChoice];
+
+print "\n=== Pilihan Server ===\n";
+$serverIndex = array_keys($server);
+foreach ($serverIndex as $j => $s) {
+    print "[".($j+1)."] {$server[$s]}\n";
+}
+$serverChoice = loadOrInput($serverIndex,"\nPilih Nomor: ");
+
+$selectedServer = $serverIndex[$serverChoice];
+
+$postData = [
+    "goodsOptionsTypeValueJson" => json_encode([
+        "rom_version" => $selectedRom,
+        "idc_code" => $selectedServer
+    ], JSON_UNESCAPED_SLASHES),
+    "classifyValue" => 16
+];
+clearScreen();
+print "=== GANTI ANDROID SERVER ===\nID Account  : {$requestParams['userId']}\nAndroid     : {$padList[$padChoice]->romVersionValue} > {$selectedRom}\nServer      : {$c->roomName} > {$server[$selectedServer]}\n\n";
+    
+while (true) {
+    $postData = [
+            "goodsOptionsTypeValueJson" => json_encode([
+                "rom_version" => $selectedRom,
+                "idc_code" => $selectedServer
+            ], JSON_UNESCAPED_SLASHES),
+            "classifyValue" => 16
+        ];
+    usleep(500000);
+    $requestParams = generateRequestParams();
+    $url = "https://twplay.redfinger.com/osfingerauth/order/checkGoods.json";
+    $response = sendRequest($url, $postData);
+    $resultCode = $response->resultCode;
+    $resultMsg = $response->resultMsg;
+    
+    $postData = [
+        "padCode" => $padCode,
+        "goodsOptionsTypeValueJson" => json_encode([
+            "rom_version" => $selectedRom,
+            "idc_code" => $selectedServer
+        ], JSON_UNESCAPED_SLASHES),
+        "renewalType" => 1,
+        "losslessConfirm" => ""
+    ];
+    
+    if ($resultCode == 0) {
+        if (preg_match('/^https:\/\/(canary\.|ptb\.)?discord\.com\/api\/webhooks\/\d+\/[\w-]+$/', $discordWebhook)) {
+            $requestParams = generateRequestParams();
+            $url = "https://twplay.redfinger.com/osfingerauth/pad/renewalPad.json";
+            $response = sendRequest($url, $postData);
+            if ($response->resultCode == 0) {
+                print "congratulation!\n";
+                $msg = "🎉 **PERGANTIAN REDFINGER BERHASIL!**\n".
+                    "Android : ".$selectedRom."\n".
+                    "Server : ".$server[$selectedServer]."\n".
+                    "Waktu : ".date("H:i"). " WIB";
+                die(sendToDiscord($discordWebhook, $msg));
+            } else {
+                die(print_r($response));
+            }
+        } else {
+            print $resultMsg."\n";
+            die(print(date("H:i") . "\n"));
+        }        
+    } elseif ($resultCode == 2108) {
+        print explode("dan", $resultMsg)[0];
+        sleep(1);
+        print $newlinePadding;
+    } elseif (in_array($resultCode, [2130, 2131])) {
+        die(print($resultMsg));
+    } elseif ($resultCode == 2135) {
+        if (preg_match('/(\d+)\s*minutes/i', $resultMsg, $m)) {
+            $seconds = (int)$m[1] * 60;
+        } elseif (preg_match('/(\d+)\s*seconds/i', $resultMsg, $m)) {
+            $seconds = (int)$m[1];
+        } else {
+            $seconds = 60;
+        }
+        waitSeconds($seconds);
+    } else {
+        print_r(removeEmptyProperties($response));
+    }
+    sleep(1);
+}
+
+
+
+function clearScreen() {
+    $clear = (strtoupper(substr(PHP_OS, 0, 3)) == 'WIN') ? 'cls' : 'clear';
+    pclose(popen($clear, 'w'));
+}
+
+function removeEmptyProperties($obj) {
+    foreach ($obj as $key => $value) {
+
+        if ($value === null || $value === "") {
+            unset($obj->$key);
+            continue;
+        }
+
+        if (is_array($value) && empty($value)) {
+            unset($obj->$key);
+            continue;
+        }
+
+        if (is_object($value) && empty((array)$value)) {
+            unset($obj->$key);
+            continue;
+        }
+    }
+
+    return $obj;
+}
+
+
+function getActiveRestockWindow($windows) {
+    $now = strtotime(date("H:i"));
+    $today = date("Y-m-d ");
+    foreach ($windows as $win) {
+        $start = strtotime($today . $win[0]);
+        $end   = strtotime($today . $win[1]);
+        if ($now >= $start && $now <= $end) {
+            return [$start, $end];
+        }
+    }
+    return null;
+}
+
+function timeUntilNextRestock($windows) {
+    $now = strtotime(date("H:i"));
+    $today = date("Y-m-d ");
+    foreach ($windows as $win) {
+        $start = strtotime($today . $win[0]);
+        if ($now < $start) return $start - $now;
+    }
+    return strtotime("+1 day " . $windows[0][0]) - $now;
+}
+
+function waitSeconds($seconds) {
+    if ($seconds <= 0) return;
+    while ($seconds > 0) {
+        print "\rMenunggu restock: " . gmdate("H:i:s", $seconds);
+        sleep(1);
+        $seconds--;
+    }
+    print "\r" . str_repeat(' ', 62 ). "\r";
+}
+
+
+function generateUUID(): string {
+    return sprintf(
+        '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+    );
+}
+
+function paramFilter(array $params, ?array $excludeKeys = null): array {
+    if ($excludeKeys === null || empty($excludeKeys)) {
+        $excludeKeys = ["sign", "sign_type", "queryString", "requestBody", "fileData", "argsSign", "signType"];
+    }
+    $filtered = [];
+    foreach ($params as $key => $value) {
+        if (!in_array($key, $excludeKeys) && $value !== null && $value !== '') {
+            $filtered[$key] = $value;
+        }
+    }
+    ksort($filtered);
+    return $filtered;
+}
+
+function createLinkString(array $params): string {
+    $pairs = [];
+    foreach ($params as $key => $value) {
+        $pairs[] = $key . '=' . $value;
+    }
+    return implode('&', $pairs);
+}
+
+function generateSign(array $params, string $signKey = SIGN_KEY, ?array $excludeKeys = null): string {
+    $filtered = paramFilter($params, $excludeKeys);
+    $linkStr = createLinkString($filtered);
+    return md5($linkStr . $signKey);
+}
+
+
+function sendToDiscord($webhook, $message) {
+    $payload = json_encode([
+        "content" => $message,
+        "username" => "Re:Hine"
+    ]);
+
+    $ch = curl_init($webhook);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json'
+    ]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    curl_exec($ch);
+    curl_close($ch);
+}
+
+
+function sendRequest(string $url, array $postData = [], int $maxRetry = 5, float $baseDelay = 2.0) {
+    global $requestParams;
+
+    $userId      = $requestParams['userId'] ?? null;
+    $sessionId   = $requestParams['sessionId'] ?? null;
+    $versionCode = $requestParams['versionCode'] ?? null;
+
+    $parsedUrl = parse_url($url);
+    $host = $parsedUrl['host'] ?? 'twplay.redfinger.com';
+
+    static $curl = null;
+    if ($curl === null) {
+        $curl = curl_init();
+    }
+
+    $attempt = 0;
+    while ($attempt < $maxRetry) {
+        $attempt++;
+        curl_reset($curl);
+
+        $headers = [
+            "User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36 RedfingerID/1.9.14.03(googleplay)",
+            "Content-Type: application/x-www-form-urlencoded",
+            "Accept: application/json",
+            "Accept-Language: en-US,en;q=0.9",
+            "Connection: keep-alive",
+            "Keep-Alive: timeout=10, max=5",
+            "Host: $host",
+            "Authorization: {$userId} {$sessionId}",
+            "Api-Version: {$versionCode}",
+        ];
+
+        $isPost = !empty($postData);
+
+        $allParams = $isPost ? array_merge($requestParams, $postData) : $requestParams;
+        $signedParams = $requestParams;
+        $signedParams['sign'] = generateSign($allParams);
+
+        if ($isPost) {
+            curl_setopt($curl, CURLOPT_URL, $url . '?' . http_build_query($requestParams));
+            curl_setopt($curl, CURLOPT_POST, true);
+            $postData['sign'] = $signedParams['sign'];
+            curl_setopt($curl, CURLOPT_POSTFIELDS, http_build_query($postData));
+        } else {
+            curl_setopt($curl, CURLOPT_URL, $url . '?' . http_build_query($signedParams));
+            curl_setopt($curl, CURLOPT_HTTPGET, true);
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_ENCODING       => "",
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_2TLS,
+        ]);
+
+        $response = curl_exec($curl);
+        $err = curl_error($curl);
+
+        if ($err) {
+            print "cURL Error: $err ... retrying\n";
+        } else {
+            $json = json_decode($response);
+            if (json_last_error() === JSON_ERROR_NONE && $json !== null) {
+                if (isset($json->resultCode) && ($json->resultCode == 2101 || $json->resultCode == 429 || isset($json->timestamp))) {
+                    print "Rate limit hit, waiting...\n";
+                } else {
+                    return $json;
+                }
+            } else {
+                print "Invalid JSON received... retrying\n";
+            }
+        }
+
+        $delay = $baseDelay * (0.5 + mt_rand() / mt_getrandmax());
+        usleep((int)($delay * 1_000_000));
+    }
+
+    return (object)[
+        "resultCode" => 'error',
+        "resultMsg"  => "Max retry reached, request failed",
+        "resultInfo" => null
+    ];
+}
+
+function generateRequestParams(?array $extra = []) {
+    global $userLink;
+    if (!is_array($extra)) $extra = [];
+    $parsed = parse_url($userLink);
+    parse_str($parsed['query'], $params);
+    $timestamp = round(microtime(true) * 1000);
+    $part1 = random_int(1000000000, 9999999999);
+    $part2 = random_int(1000000000, 9999999999);
+    $part3 = random_int(100000, 999999);
+
+    $rand = $part1 . $part2 . $part3;
+    $base = [
+        'languageType' => 'in_ID',
+        'userSource' => 'google-play',
+        'medium' => 'organic',
+        'sessionId' => $params['sessionId'],
+        'versionName' => '1.9.14.03',
+        'uuid' => generateUUID(),
+        'afId' => $timestamp . '-' . $rand,
+        'userId'  => $params['userId'],
+        'versionCode' => '100914003',
+        'mobileBrand' => 'iQOO',
+        'mobileModel' => 'I2220',
+        'client' => 'android',
+        'campaign' => '',
+        'model' => 'I2220',
+        'channelVersionCode' => 'googleplay',
+        'timestamp' => $timestamp
+    ];
+    return array_merge($base, $extra);
+}
+
+
+
+function loadOrInput($source, $message = "Input Data: ") {
+    // Mode load/save file
+    if ($source === "load") {
+        $data = '';
+        if (file_exists($message)) {
+            $data = trim(file_get_contents($message));
+        }
+
+        if ($data === '') {
+            print "Input Data $message: ";
+            $data = trim(fgets(STDIN));
+            file_put_contents($message, $data);
+        }
+
+        return $data;
+    }
+
+    // Mode input angka dari range
+    if (is_numeric($source)) {
+        $max = (int)$source;
+        while (true) {
+            print $message;
+            $input = trim(fgets(STDIN));
+
+            preg_match_all('/\d+/', $input, $matches);
+            if (empty($matches[0])) {
+                print "Input harus angka!\n";
+                continue;
+            }
+
+            $num = (int)implode('', $matches[0]);
+
+            if ($num >= 1 && $num <= $max) {
+                return $num;
+            }
+
+            print "Pilihan hanya 1 sampai $max!\n";
+        }
+    }
+
+    // Mode input angka dari array
+    if (is_array($source)) {
+        $max = count($source);
+        while (true) {
+            print $message;
+            $input = trim(fgets(STDIN));
+
+            preg_match_all('/\d+/', $input, $matches);
+            if (empty($matches[0])) {
+                print "Input harus angka!\n";
+                continue;
+            }
+
+            $num = (int)implode('', $matches[0]);
+            $index = $num - 1;
+
+            if ($index >= 0 && $index < $max) {
+                return $index;
+            }
+
+            print "Pilihan hanya 1 sampai $max!\n";
+        }
+    }
+
+    print "Parameter pertama harus angka, array, atau 'load'!\n";
+    return null;
+}
